@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "432951016788",
+    "project_id": "coc-univo-app",
+    "storage_bucket": "coc-univo-app.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:432951016788:android:bf80d6b8591c4771679cc1",
+        "android_client_info": {
+          "package_name": "com.univo.coc.carnet_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBKX7E2CPfZvPR7oJKDBltVuUrUaRDizE4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:432951016788:android:1660f5cdae043b79679cc1",
+        "android_client_info": {
+          "package_name": "com.univo.coc.coc_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBKX7E2CPfZvPR7oJKDBltVuUrUaRDizE4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
