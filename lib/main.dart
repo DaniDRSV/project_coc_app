@@ -1,18 +1,45 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'screens/login_screen.dart'; // Crearemos esta pantalla en el paso 4
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'screens/login_screen.dart';
+import 'screens/home_screen.dart';
 
 void main() async {
-  // Asegura que los widgets de Flutter carguen antes de Firebase
   WidgetsFlutterBinding.ensureInitialized();
-  // Inicializa el proyecto con los archivos de configuración (google-services.json)
   await Firebase.initializeApp();
 
-  runApp(const MyApp());
+  Widget initialScreen = const LoginScreen();
+  User? user = FirebaseAuth.instance.currentUser;
+
+  // Si hay un usuario en Firebase, verificamos si pidió mantener la sesión
+  if (user != null) {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    bool keepSession = prefs.getBool('keep_session') ?? false;
+
+    if (keepSession) {
+      try {
+        DocumentSnapshot doc = await FirebaseFirestore.instance.collection('usuarios').doc(user.uid).get();
+        if (doc.exists) {
+          String rol = (doc.data() as Map<String, dynamic>)['rol'] ?? 'operador';
+          initialScreen = HomeScreen(rol: rol);
+        }
+      } catch (e) {
+        // En caso de error de red, cae al login
+      }
+    } else {
+      // Si no marcó la casilla en su último inicio, cerramos la sesión residual
+      await FirebaseAuth.instance.signOut();
+    }
+  }
+
+  runApp(MyApp(initialScreen: initialScreen));
 }
 
 class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+  final Widget initialScreen;
+  const MyApp({super.key, required this.initialScreen});
 
   @override
   Widget build(BuildContext context) {
@@ -20,10 +47,10 @@ class MyApp extends StatelessWidget {
       title: 'Sistema COC UNIVO',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        primaryColor: const Color(0xff1a237e), // Azul institucional UNIVO
+        primaryColor: const Color(0xff1a237e),
         scaffoldBackgroundColor: Colors.white,
       ),
-      home: const LoginScreen(), // Pantalla de inicio
+      home: initialScreen, // Carga la pantalla calculada en el main
     );
   }
 }

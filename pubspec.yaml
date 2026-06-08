@@ -22,6 +22,7 @@ dependencies:
   excel: ^4.0.0
   path_provider: ^2.1.2
   share_plus: ^9.0.0
+  shared_preferences: ^2.5.5
 
 dev_dependencies:
   flutter_test:

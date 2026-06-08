@@ -36,9 +36,9 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> with SingleTickerPr
           controller: _tabController,
           indicatorColor: Colors.white,
           indicatorWeight: 4,
-          labelColor: Colors.white, // Texto seleccionado BLANCO
-          unselectedLabelColor: Colors.white70, // Texto no seleccionado BLANCO suave
-          isScrollable: true,
+          labelColor: Colors.white,
+          unselectedLabelColor: Colors.white70,
+          labelPadding: EdgeInsets.zero, // Centra las pestañas en pantallas alargadas
           tabs: const [
             Tab(icon: Icon(Icons.people), text: "Usuarios"),
             Tab(icon: Icon(Icons.business), text: "Sedes"),
@@ -92,9 +92,35 @@ class _UsersTab extends StatelessWidget {
                   ),
                   title: Text(user['nombre'], style: const TextStyle(fontWeight: FontWeight.bold)),
                   subtitle: Text("${user['correo']}\nSEDE: ${user['sede'] ?? 'Sin sede'} • ${user['rol'].toString().toUpperCase()}"),
-                  trailing: IconButton(
+                  trailing: isSelf
+                      ? IconButton(
                     icon: const Icon(Icons.edit, color: Color(0xff1a237e)),
                     onPressed: () => _showUserDialog(context, doc.id, user, isSelf),
+                    tooltip: "Editar mi perfil",
+                  )
+                      : PopupMenuButton<String>(
+                    icon: const Icon(Icons.more_vert, color: Color(0xff1a237e)),
+                    onSelected: (value) {
+                      if (value == 'editar') {
+                        _showUserDialog(context, doc.id, user, isSelf);
+                      } else if (value == 'bloquear') {
+                        doc.reference.update({'estado': isActive ? 'inactivo' : 'activo'});
+                      } else if (value == 'eliminar') {
+                        _confirmDeleteUser(context, doc.reference, user['nombre']);
+                      }
+                    },
+                    itemBuilder: (context) => [
+                      const PopupMenuItem(value: 'editar', child: Row(children: [Icon(Icons.edit, color: Colors.blue, size: 20), SizedBox(width: 10), Text("Editar")])),
+                      PopupMenuItem(
+                          value: 'bloquear',
+                          child: Row(children: [
+                            Icon(isActive ? Icons.block : Icons.check_circle, color: isActive ? Colors.orange : Colors.green, size: 20),
+                            const SizedBox(width: 10),
+                            Text(isActive ? "Bloquear Acceso" : "Permitir Acceso")
+                          ])
+                      ),
+                      const PopupMenuItem(value: 'eliminar', child: Row(children: [Icon(Icons.delete, color: Colors.red, size: 20), SizedBox(width: 10), Text("Eliminar Registro")])),
+                    ],
                   ),
                 ),
               );
@@ -139,17 +165,17 @@ class _UsersTab extends StatelessWidget {
                   onChanged: isSelf ? null : (v) => setState(() => selectedRole = v!),
                 ),
                 StreamBuilder<QuerySnapshot>(
-                  stream: FirebaseFirestore.instance.collection('sedes').snapshots(),
-                  builder: (context, snap) {
-                    if (!snap.hasData) return const LinearProgressIndicator();
-                    return DropdownButtonFormField<String>(
-                      value: selectedSede,
-                      decoration: const InputDecoration(labelText: "Sede de Trabajo", prefixIcon: Icon(Icons.business)),
-                      items: snap.data!.docs.map((s) => DropdownMenuItem(value: s['nombre'].toString(), child: Text(s['nombre']))).toList(),
-                      onChanged: (v) => setState(() => selectedSede = v),
-                      validator: (v) => v == null ? "Seleccione una sede" : null,
-                    );
-                  }
+                    stream: FirebaseFirestore.instance.collection('sedes').snapshots(),
+                    builder: (context, snap) {
+                      if (!snap.hasData) return const LinearProgressIndicator();
+                      return DropdownButtonFormField<String>(
+                        value: selectedSede,
+                        decoration: const InputDecoration(labelText: "Sede de Trabajo", prefixIcon: Icon(Icons.business)),
+                        items: snap.data!.docs.map((s) => DropdownMenuItem(value: s['nombre'].toString(), child: Text(s['nombre']))).toList(),
+                        onChanged: (v) => setState(() => selectedSede = v),
+                        validator: (v) => v == null ? "Seleccione una sede" : null,
+                      );
+                    }
                 ),
               ]),
             ),
@@ -180,6 +206,28 @@ class _UsersTab extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  void _confirmDeleteUser(BuildContext context, DocumentReference docRef, String userName) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("Eliminar Usuario", style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+        content: Text("¿Estás seguro de que deseas eliminar permanentemente a $userName?\n\nAl eliminarlo, se revocará su acceso al sistema de forma definitiva."),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text("CANCELAR")),
+          ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+              onPressed: () async {
+                await docRef.delete();
+                if (context.mounted) Navigator.pop(context);
+              },
+              child: const Text("ELIMINAR", style: TextStyle(color: Colors.white))
+          ),
+        ],
       ),
     );
   }
@@ -219,24 +267,24 @@ class _SedesTab extends StatelessWidget {
   void _addSede(BuildContext context) {
     final ctrl = TextEditingController();
     showDialog(
-      context: context, 
-      builder: (context) => AlertDialog(
-        title: const Text("Nueva Sede Institucional"), 
-        content: TextField(controller: ctrl, decoration: const InputDecoration(labelText: "Nombre de la Sede")), 
-        actions: [
-          ElevatedButton.icon(
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xff1a237e), foregroundColor: Colors.white),
-            icon: const Icon(Icons.add, color: Colors.white),
-            label: const Text("AÑADIR"),
-            onPressed: () {
-              if (ctrl.text.isNotEmpty) {
-                FirebaseFirestore.instance.collection('sedes').add({'nombre': ctrl.text.trim()});
-                Navigator.pop(context);
-              }
-            }
-          )
-        ]
-      )
+        context: context,
+        builder: (context) => AlertDialog(
+            title: const Text("Nueva Sede Institucional"),
+            content: TextField(controller: ctrl, decoration: const InputDecoration(labelText: "Nombre de la Sede")),
+            actions: [
+              ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xff1a237e), foregroundColor: Colors.white),
+                  icon: const Icon(Icons.add, color: Colors.white),
+                  label: const Text("AÑADIR"),
+                  onPressed: () {
+                    if (ctrl.text.isNotEmpty) {
+                      FirebaseFirestore.instance.collection('sedes').add({'nombre': ctrl.text.trim()});
+                      Navigator.pop(context);
+                    }
+                  }
+              )
+            ]
+        )
     );
   }
 }
@@ -285,8 +333,8 @@ class _PermissionsTab extends StatelessWidget {
   Widget _pSwitch(String label, String key, Map<String, dynamic> data) {
     bool val = data[key] ?? true;
     return SwitchListTile(
-      title: Text(label, style: const TextStyle(fontSize: 14)), 
-      value: val, 
+      title: Text(label, style: const TextStyle(fontSize: 14)),
+      value: val,
       activeColor: const Color(0xff1a237e),
       onChanged: (bool nv) => FirebaseFirestore.instance.collection('configuracion').doc('permisos').set({key: nv}, SetOptions(merge: true)),
     );
@@ -308,9 +356,9 @@ class _CareersTab extends StatelessWidget {
             itemBuilder: (context, index) {
               var doc = snapshot.data!.docs[index];
               return ListTile(
-                leading: const Icon(Icons.school, color: Color(0xff1a237e)),
-                title: Text(doc['nombre']), 
-                trailing: IconButton(icon: const Icon(Icons.delete), onPressed: () => doc.reference.delete())
+                  leading: const Icon(Icons.school, color: Color(0xff1a237e)),
+                  title: Text(doc['nombre']),
+                  trailing: IconButton(icon: const Icon(Icons.delete), onPressed: () => doc.reference.delete())
               );
             },
           );
@@ -322,21 +370,21 @@ class _CareersTab extends StatelessWidget {
         label: const Text("Añadir Carrera", style: TextStyle(color: Colors.white)),
         onPressed: () {
           showDialog(context: context, builder: (context) => AlertDialog(
-            title: const Text("Nueva Carrera Universitaria"), 
-            content: TextField(controller: ctrl), 
-            actions: [
-              ElevatedButton.icon(
-                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xff1a237e), foregroundColor: Colors.white),
-                icon: const Icon(Icons.add, color: Colors.white),
-                label: const Text("AÑADIR"),
-                onPressed: () {
-                  if (ctrl.text.isNotEmpty) {
-                    FirebaseFirestore.instance.collection('carreras').add({'nombre': ctrl.text.trim()});
-                    Navigator.pop(context);
-                  }
-                }
-              )
-            ]
+              title: const Text("Nueva Carrera Universitaria"),
+              content: TextField(controller: ctrl),
+              actions: [
+                ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(backgroundColor: const Color(0xff1a237e), foregroundColor: Colors.white),
+                    icon: const Icon(Icons.add, color: Colors.white),
+                    label: const Text("AÑADIR"),
+                    onPressed: () {
+                      if (ctrl.text.isNotEmpty) {
+                        FirebaseFirestore.instance.collection('carreras').add({'nombre': ctrl.text.trim()});
+                        Navigator.pop(context);
+                      }
+                    }
+                )
+              ]
           ));
         },
       ),

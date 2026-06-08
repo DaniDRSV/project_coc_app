@@ -275,12 +275,26 @@ class _StudentModuleScreenState extends State<StudentModuleScreen> {
                           child: Signature(controller: _signatureController, height: 150, backgroundColor: Colors.grey.shade100),
                         ),
                         Row(
-                          mainAxisAlignment: MainAxisAlignment.end,
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
+                            Row(
+                              children: [
+                                IconButton(
+                                  icon: const Icon(Icons.undo, color: Color(0xff1a237e)),
+                                  onPressed: () => _signatureController.undo(),
+                                  tooltip: "Deshacer último trazo",
+                                ),
+                                IconButton(
+                                  icon: const Icon(Icons.redo, color: Color(0xff1a237e)),
+                                  onPressed: () => _signatureController.redo(),
+                                  tooltip: "Rehacer",
+                                ),
+                              ],
+                            ),
                             TextButton.icon(
                               onPressed: () => _signatureController.clear(),
                               icon: const Icon(Icons.delete_outline, color: Colors.red),
-                              label: const Text("Borrar Firma", style: TextStyle(color: Colors.red)),
+                              label: const Text("Borrar todo", style: TextStyle(color: Colors.red)),
                             ),
                           ],
                         ),
