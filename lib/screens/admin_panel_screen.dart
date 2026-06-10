@@ -16,7 +16,7 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> with SingleTickerPr
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 4, vsync: this);
+    _tabController = TabController(length: 3, vsync: this);
   }
 
   @override
@@ -38,11 +38,10 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> with SingleTickerPr
           indicatorWeight: 4,
           labelColor: Colors.white,
           unselectedLabelColor: Colors.white70,
-          labelPadding: EdgeInsets.zero, // Centra las pestañas en pantallas alargadas
+          labelPadding: EdgeInsets.zero,
           tabs: const [
             Tab(icon: Icon(Icons.people), text: "Usuarios"),
             Tab(icon: Icon(Icons.business), text: "Sedes"),
-            Tab(icon: Icon(Icons.security), text: "Permisos"),
             Tab(icon: Icon(Icons.school), text: "Carreras"),
           ],
         ),
@@ -52,7 +51,6 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> with SingleTickerPr
         children: [
           const _UsersTab(),
           const _SedesTab(),
-          const _PermissionsTab(),
           const _CareersTab(),
         ],
       ),
@@ -110,7 +108,7 @@ class _UsersTab extends StatelessWidget {
                       }
                     },
                     itemBuilder: (context) => [
-                      const PopupMenuItem(value: 'editar', child: Row(children: [Icon(Icons.edit, color: Colors.blue, size: 20), SizedBox(width: 10), Text("Editar")])),
+                      const PopupMenuItem(value: 'editar', child: Row(children: [Icon(Icons.edit, color: Colors.blue, size: 20), SizedBox(width: 10), Text("Editar Perfil & Permisos")])),
                       PopupMenuItem(
                           value: 'bloquear',
                           child: Row(children: [
@@ -142,8 +140,20 @@ class _UsersTab extends StatelessWidget {
     final nameCtrl = TextEditingController(text: user?['nombre'] ?? '');
     final emailCtrl = TextEditingController(text: user?['correo'] ?? '');
     final passCtrl = TextEditingController();
+
     String selectedRole = user?['rol'] ?? 'operador';
     String? selectedSede = user?['sede'];
+
+    Map<String, dynamic> perms = user?['permisos'] ?? {
+      'mod_emision': true,
+      'mod_inventario': true,
+      'mod_reportes': true,
+      'act_inv_crear': true,
+      'act_inv_editar': true,
+      'act_emi_error': true,
+      'act_excel': true,
+      'act_pdf': true,
+    };
 
     showDialog(
       context: context,
@@ -154,16 +164,20 @@ class _UsersTab extends StatelessWidget {
           content: SingleChildScrollView(
             child: Form(
               key: formKey,
-              child: Column(mainAxisSize: MainAxisSize.min, children: [
+              child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
                 TextFormField(controller: nameCtrl, decoration: const InputDecoration(labelText: "Nombre Completo", prefixIcon: Icon(Icons.person))),
+                const SizedBox(height: 10),
                 if (uid == null) TextFormField(controller: emailCtrl, decoration: const InputDecoration(labelText: "Correo Institucional", prefixIcon: Icon(Icons.email))),
+                if (uid != null) TextFormField(controller: emailCtrl, enabled: false, decoration: const InputDecoration(labelText: "Correo Institucional (No editable)", prefixIcon: Icon(Icons.email))),
                 if (uid == null) TextFormField(controller: passCtrl, decoration: const InputDecoration(labelText: "Contraseña", prefixIcon: Icon(Icons.lock)), obscureText: true),
+                const SizedBox(height: 10),
                 DropdownButtonFormField<String>(
                   value: selectedRole,
                   decoration: const InputDecoration(labelText: "Rol", prefixIcon: Icon(Icons.admin_panel_settings)),
                   items: const [DropdownMenuItem(value: 'admin', child: Text("Administrador")), DropdownMenuItem(value: 'operador', child: Text("Operador"))],
                   onChanged: isSelf ? null : (v) => setState(() => selectedRole = v!),
                 ),
+                const SizedBox(height: 10),
                 StreamBuilder<QuerySnapshot>(
                     stream: FirebaseFirestore.instance.collection('sedes').snapshots(),
                     builder: (context, snap) {
@@ -177,6 +191,29 @@ class _UsersTab extends StatelessWidget {
                       );
                     }
                 ),
+
+                if (selectedRole == 'operador' && !isSelf) ...[
+                  const Padding(
+                    padding: EdgeInsets.only(top: 25, bottom: 5),
+                    child: Center(child: Text("PERMISOS DEL OPERADOR", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.indigo))),
+                  ),
+                  const Divider(),
+                  const Text("ACCESO A MÓDULOS", style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.grey)),
+                  SwitchListTile(contentPadding: EdgeInsets.zero, title: const Text("Módulo Emisión", style: TextStyle(fontSize: 13)), value: perms['mod_emision'] ?? true, onChanged: (v) => setState(() => perms['mod_emision'] = v)),
+                  SwitchListTile(contentPadding: EdgeInsets.zero, title: const Text("Módulo Inventario", style: TextStyle(fontSize: 13)), value: perms['mod_inventario'] ?? true, onChanged: (v) => setState(() => perms['mod_inventario'] = v)),
+                  SwitchListTile(contentPadding: EdgeInsets.zero, title: const Text("Módulo Reportes", style: TextStyle(fontSize: 13)), value: perms['mod_reportes'] ?? true, onChanged: (v) => setState(() => perms['mod_reportes'] = v)),
+
+                  const SizedBox(height: 10),
+                  const Text("GESTIÓN DE INVENTARIO", style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.grey)),
+                  SwitchListTile(contentPadding: EdgeInsets.zero, title: const Text("Agregar Nuevos Materiales", style: TextStyle(fontSize: 13)), value: perms['act_inv_crear'] ?? true, onChanged: (v) => setState(() => perms['act_inv_crear'] = v)),
+                  SwitchListTile(contentPadding: EdgeInsets.zero, title: const Text("Modificar Stock Existente", style: TextStyle(fontSize: 13)), value: perms['act_inv_editar'] ?? true, onChanged: (v) => setState(() => perms['act_inv_editar'] = v)),
+
+                  const SizedBox(height: 10),
+                  const Text("AUDITORÍA Y REPORTES", style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.grey)),
+                  SwitchListTile(contentPadding: EdgeInsets.zero, title: const Text("Reportar Errores de Impresión", style: TextStyle(fontSize: 13)), value: perms['act_emi_error'] ?? true, onChanged: (v) => setState(() => perms['act_emi_error'] = v)),
+                  SwitchListTile(contentPadding: EdgeInsets.zero, title: const Text("Generar Reportes en EXCEL", style: TextStyle(fontSize: 13)), value: perms['act_excel'] ?? true, onChanged: (v) => setState(() => perms['act_excel'] = v)),
+                  SwitchListTile(contentPadding: EdgeInsets.zero, title: const Text("Generar Reportes en PDF", style: TextStyle(fontSize: 13)), value: perms['act_pdf'] ?? true, onChanged: (v) => setState(() => perms['act_pdf'] = v)),
+                ]
               ]),
             ),
           ),
@@ -192,10 +229,22 @@ class _UsersTab extends StatelessWidget {
                     if (uid == null) {
                       FirebaseApp app = await Firebase.initializeApp(name: 'Temp', options: Firebase.app().options);
                       UserCredential cred = await FirebaseAuth.instanceFor(app: app).createUserWithEmailAndPassword(email: emailCtrl.text.trim(), password: passCtrl.text.trim());
-                      await FirebaseFirestore.instance.collection('usuarios').doc(cred.user!.uid).set({'nombre': nameCtrl.text.trim(), 'correo': emailCtrl.text.trim(), 'rol': selectedRole, 'sede': selectedSede, 'estado': 'activo'});
+                      await FirebaseFirestore.instance.collection('usuarios').doc(cred.user!.uid).set({
+                        'nombre': nameCtrl.text.trim(),
+                        'correo': emailCtrl.text.trim(),
+                        'rol': selectedRole,
+                        'sede': selectedSede,
+                        'estado': 'activo',
+                        'permisos': perms
+                      });
                       await app.delete();
                     } else {
-                      await FirebaseFirestore.instance.collection('usuarios').doc(uid).update({'nombre': nameCtrl.text.trim(), 'rol': selectedRole, 'sede': selectedSede});
+                      await FirebaseFirestore.instance.collection('usuarios').doc(uid).update({
+                        'nombre': nameCtrl.text.trim(),
+                        'rol': selectedRole,
+                        'sede': selectedSede,
+                        'permisos': perms
+                      });
                     }
                     Navigator.pop(context);
                   } catch (e) {
@@ -285,58 +334,6 @@ class _SedesTab extends StatelessWidget {
               )
             ]
         )
-    );
-  }
-}
-
-class _PermissionsTab extends StatelessWidget {
-  const _PermissionsTab();
-  @override
-  Widget build(BuildContext context) {
-    return StreamBuilder<DocumentSnapshot>(
-      stream: FirebaseFirestore.instance.collection('configuracion').doc('permisos').snapshots(),
-      builder: (context, snapshot) {
-        if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
-        var data = snapshot.data!.data() as Map<String, dynamic>? ?? {};
-        return ListView(
-          padding: const EdgeInsets.all(20),
-          children: [
-            const Text("CONFIGURACIÓN PARA OPERADORES", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Color(0xff1a237e))),
-            const Text("Define qué módulos y funciones tiene permitidos el personal operativo.", style: TextStyle(fontSize: 12, color: Colors.grey)),
-            const Divider(height: 30),
-            _sectionHeader("ACCESO A MÓDULOS"),
-            _pSwitch("Habilitar Módulo Emisión", "perm_mod_emision", data),
-            _pSwitch("Habilitar Módulo Inventario", "perm_mod_inventario", data),
-            _pSwitch("Habilitar Módulo Reportes", "perm_mod_reportes", data),
-            const SizedBox(height: 20),
-            _sectionHeader("ACCIONES Y AUDITORÍA"),
-            _pSwitch("Permitir Generar Reportes en EXCEL", "perm_act_excel", data),
-            _pSwitch("Permitir Generar Reportes en PDF", "perm_act_pdf", data),
-            _pSwitch("Permitir Reportar Errores de Impresión", "perm_act_emi_error", data),
-            const SizedBox(height: 20),
-            _sectionHeader("GESTIÓN DE INVENTARIO"),
-            _pSwitch("Permitir Agregar Nuevos Materiales", "perm_act_inv_crear", data),
-            _pSwitch("Permitir Editar Stock Existente", "perm_act_inv_editar", data),
-          ],
-        );
-      },
-    );
-  }
-
-  Widget _sectionHeader(String title) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 10, bottom: 5),
-      child: Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.indigo)),
-    );
-  }
-
-  Widget _pSwitch(String label, String key, Map<String, dynamic> data) {
-    bool val = data[key] ?? true;
-    return SwitchListTile(
-      title: Text(label, style: const TextStyle(fontSize: 14)),
-      value: val,
-      activeColor: const Color(0xff1a237e),
-      onChanged: (bool nv) => FirebaseFirestore.instance.collection('configuracion').doc('permisos').set({key: nv}, SetOptions(merge: true)),
     );
   }
 }

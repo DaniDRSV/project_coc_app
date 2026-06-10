@@ -96,13 +96,16 @@ class _ReportsScreenState extends State<ReportsScreen> with SingleTickerProvider
 
   void _mostrarDialogoReporteError(DocumentSnapshot emisionDoc) async {
     var u = FirebaseAuth.instance.currentUser;
+    // AHORA LEE LOS PERMISOS DIRECTAMENTE DEL PERFIL
     var userDoc = await FirebaseFirestore.instance.collection('usuarios').doc(u?.uid).get();
-    String rol = userDoc.data()?['rol'] ?? 'operador';
-    String nombreOp = userDoc.data()?['nombre'] ?? 'Operador';
-    String sedeOp = userDoc.data()?['sede'] ?? 'Sin sede';
+    var userData = userDoc.data() ?? {};
 
-    var permDoc = await FirebaseFirestore.instance.collection('configuracion').doc('permisos').get();
-    bool puedeReportar = rol == 'admin' || (permDoc.data()?['perm_act_emi_error'] ?? true);
+    String rol = userData['rol'] ?? 'operador';
+    String nombreOp = userData['nombre'] ?? 'Operador';
+    String sedeOp = userData['sede'] ?? 'Sin sede';
+    var permisos = userData['permisos'] as Map<String, dynamic>? ?? {};
+
+    bool puedeReportar = rol == 'admin' || (permisos['act_emi_error'] ?? true);
 
     if (!puedeReportar) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("No tienes permiso para reportar errores.", style: TextStyle(fontWeight: FontWeight.bold)), backgroundColor: Colors.orange));
@@ -112,7 +115,6 @@ class _ReportsScreenState extends State<ReportsScreen> with SingleTickerProvider
     final motivoCtrl = TextEditingController();
     final cantidadCtrl = TextEditingController(text: "1");
 
-    // Extracción segura de datos
     var data = emisionDoc.data() as Map<String, dynamic>? ?? {};
     String codigoEmision = data['codigo'] ?? 'S/C';
 
@@ -213,25 +215,40 @@ class _ReportsScreenState extends State<ReportsScreen> with SingleTickerProvider
           ),
         ],
       ),
-      floatingActionButton: Column(
-        mainAxisAlignment: MainAxisAlignment.end,
-        children: [
-          FloatingActionButton.extended(
-            heroTag: "btn_ex",
-            onPressed: () => _showExportPreview("Excel"),
-            backgroundColor: Colors.green.shade800,
-            icon: const Icon(Icons.table_view, color: Colors.white),
-            label: const Text("EXCEL", style: TextStyle(color: Colors.white)),
-          ),
-          const SizedBox(height: 10),
-          FloatingActionButton.extended(
-            heroTag: "btn_pd",
-            onPressed: () => _showExportPreview("PDF"),
-            backgroundColor: Colors.red.shade800,
-            icon: const Icon(Icons.picture_as_pdf, color: Colors.white),
-            label: const Text("PDF", style: TextStyle(color: Colors.white)),
-          ),
-        ],
+      // AHORA LOS BOTONES EXCEL Y PDF VERIFICAN PERMISOS
+      floatingActionButton: StreamBuilder<DocumentSnapshot>(
+          stream: FirebaseFirestore.instance.collection('usuarios').doc(FirebaseAuth.instance.currentUser?.uid).snapshots(),
+          builder: (context, snapshot) {
+            var data = snapshot.data?.data() as Map<String, dynamic>? ?? {};
+            String rol = data['rol'] ?? 'operador';
+            var permisos = data['permisos'] as Map<String, dynamic>? ?? {};
+
+            bool canExcel = rol == 'admin' || (permisos['act_excel'] ?? true);
+            bool canPdf = rol == 'admin' || (permisos['act_pdf'] ?? true);
+
+            return Column(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                if (canExcel)
+                  FloatingActionButton.extended(
+                    heroTag: "btn_ex",
+                    onPressed: () => _showExportPreview("Excel"),
+                    backgroundColor: Colors.green.shade800,
+                    icon: const Icon(Icons.table_view, color: Colors.white),
+                    label: const Text("EXCEL", style: TextStyle(color: Colors.white)),
+                  ),
+                if (canExcel && canPdf) const SizedBox(height: 10),
+                if (canPdf)
+                  FloatingActionButton.extended(
+                    heroTag: "btn_pd",
+                    onPressed: () => _showExportPreview("PDF"),
+                    backgroundColor: Colors.red.shade800,
+                    icon: const Icon(Icons.picture_as_pdf, color: Colors.white),
+                    label: const Text("PDF", style: TextStyle(color: Colors.white)),
+                  ),
+              ],
+            );
+          }
       ),
     );
   }

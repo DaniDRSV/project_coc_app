@@ -6,7 +6,7 @@ import 'package:signature/signature.dart';
 
 class StudentModuleScreen extends StatefulWidget {
   final String rol;
-  final String sede; // Nueva propiedad requerida
+  final String sede;
 
   const StudentModuleScreen({super.key, required this.rol, required this.sede});
 
@@ -20,7 +20,7 @@ class _StudentModuleScreenState extends State<StudentModuleScreen> {
 
   final TextEditingController _nombreController = TextEditingController();
   final TextEditingController _codigoController = TextEditingController();
-  String? _carreraSeleccionada; 
+  String? _carreraSeleccionada;
   DateTime _fechaEmision = DateTime.now();
   String _nombreOperador = "Cargando...";
 
@@ -155,7 +155,7 @@ class _StudentModuleScreenState extends State<StudentModuleScreen> {
           'tipoTramite': _tipoTramiteSugerido,
           'atendidoPor': _nombreOperador,
           'atendidoPorUid': currentUser?.uid,
-          'sede': widget.sede, // Guardamos la sede de emisión
+          'sede': widget.sede,
           'firma': signatureBase64,
         };
 
@@ -192,22 +192,23 @@ class _StudentModuleScreenState extends State<StudentModuleScreen> {
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("CANCELAR")),
           ElevatedButton(
-            onPressed: () async {
-              if (ctrl.text.isNotEmpty) {
-                await FirebaseFirestore.instance.collection('errores_impresion').add({
-                  'codigo': _codigoController.text,
-                  'motivo': ctrl.text.trim(),
-                  'fecha': FieldValue.serverTimestamp(),
-                  'reportadoPor': _nombreOperador,
-                  'atendidoPorUid': FirebaseAuth.instance.currentUser?.uid,
-                  'sede': widget.sede, // Guardamos la sede donde ocurrió el error
-                });
-                await _descontarInventario(1);
-                Navigator.pop(ctx);
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Error reportado")));
-              }
-            }, 
-            child: const Text("ENVIAR")
+              onPressed: () async {
+                if (ctrl.text.isNotEmpty) {
+                  await FirebaseFirestore.instance.collection('errores_impresion').add({
+                    'codigo': _codigoController.text,
+                    'motivo': ctrl.text.trim(),
+                    'material_perdido': 1, // Descuenta 1 PVC por defecto al reportar desde aquí
+                    'fecha': FieldValue.serverTimestamp(),
+                    'reportadoPor': _nombreOperador,
+                    'atendidoPorUid': FirebaseAuth.instance.currentUser?.uid,
+                    'sede': widget.sede,
+                  });
+                  await _descontarInventario(1);
+                  Navigator.pop(ctx);
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Error reportado")));
+                }
+              },
+              child: const Text("ENVIAR")
           )
         ],
       ),
@@ -216,112 +217,117 @@ class _StudentModuleScreenState extends State<StudentModuleScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return StreamBuilder<DocumentSnapshot>(
-      stream: FirebaseFirestore.instance.collection('configuracion').doc('permisos').snapshots(),
-      builder: (context, snapshotPermisos) {
-        var permisos = snapshotPermisos.data?.data() as Map<String, dynamic>? ?? {};
-        bool puedeReportarError = widget.rol == 'admin' || (permisos['perm_act_emi_error'] ?? true);
+    final uid = FirebaseAuth.instance.currentUser?.uid;
 
-        return Scaffold(
-          appBar: AppBar(title: const Text("Módulo de Emisión"), backgroundColor: const Color(0xff1a237e), foregroundColor: Colors.white),
-          body: SingleChildScrollView(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              children: [
-                Card(
-                  elevation: 4,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 5),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: TextField(
-                            controller: _searchController,
-                            textCapitalization: TextCapitalization.characters,
-                            decoration: const InputDecoration(hintText: "Código Estudiante", border: InputBorder.none),
-                            onSubmitted: (_) => _buscarEstudiante(),
+    return StreamBuilder<DocumentSnapshot>(
+      // AHORA LEE DEL USUARIO DIRECTAMENTE
+        stream: FirebaseFirestore.instance.collection('usuarios').doc(uid).snapshots(),
+        builder: (context, snapshotUser) {
+          var userData = snapshotUser.data?.data() as Map<String, dynamic>? ?? {};
+          var permisos = userData['permisos'] as Map<String, dynamic>? ?? {};
+
+          bool puedeReportarError = widget.rol == 'admin' || (permisos['act_emi_error'] ?? true);
+
+          return Scaffold(
+            appBar: AppBar(title: const Text("Módulo de Emisión"), backgroundColor: const Color(0xff1a237e), foregroundColor: Colors.white),
+            body: SingleChildScrollView(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                children: [
+                  Card(
+                    elevation: 4,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 5),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: _searchController,
+                              textCapitalization: TextCapitalization.characters,
+                              decoration: const InputDecoration(hintText: "Código Estudiante", border: InputBorder.none),
+                              onSubmitted: (_) => _buscarEstudiante(),
+                            ),
                           ),
-                        ),
-                        _isSearching ? const CircularProgressIndicator() : IconButton(icon: const Icon(Icons.search), onPressed: _buscarEstudiante),
-                      ],
+                          _isSearching ? const CircularProgressIndicator() : IconButton(icon: const Icon(Icons.search), onPressed: _buscarEstudiante),
+                        ],
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(height: 20),
-                if (_hasSearched) ...[
-                  _buildStatusIndicator(),
                   const SizedBox(height: 20),
-                  Form(
-                    key: _formKey,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        _buildField(_nombreController, "Nombre Completo", Icons.person),
-                        const SizedBox(height: 15),
-                        _buildField(_codigoController, "Código", Icons.tag, enabled: false),
-                        const SizedBox(height: 15),
-                        DropdownButtonFormField<String>(
-                          value: _carreraSeleccionada,
-                          isExpanded: true,
-                          decoration: InputDecoration(labelText: "Carrera", border: OutlineInputBorder(borderRadius: BorderRadius.circular(12))),
-                          items: _carreras.map((c) => DropdownMenuItem(value: c, child: Text(c, style: const TextStyle(fontSize: 12)))).toList(),
-                          onChanged: (v) => setState(() => _carreraSeleccionada = v),
-                        ),
-                        const SizedBox(height: 20),
-                        const Text("Firma Estudiante:", style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xff1a237e))),
-                        const SizedBox(height: 10),
-                        Container(
-                          decoration: BoxDecoration(border: Border.all(color: Colors.grey), borderRadius: BorderRadius.circular(12)),
-                          child: Signature(controller: _signatureController, height: 150, backgroundColor: Colors.grey.shade100),
-                        ),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Row(
-                              children: [
-                                IconButton(
-                                  icon: const Icon(Icons.undo, color: Color(0xff1a237e)),
-                                  onPressed: () => _signatureController.undo(),
-                                  tooltip: "Deshacer último trazo",
-                                ),
-                                IconButton(
-                                  icon: const Icon(Icons.redo, color: Color(0xff1a237e)),
-                                  onPressed: () => _signatureController.redo(),
-                                  tooltip: "Rehacer",
-                                ),
-                              ],
-                            ),
-                            TextButton.icon(
-                              onPressed: () => _signatureController.clear(),
-                              icon: const Icon(Icons.delete_outline, color: Colors.red),
-                              label: const Text("Borrar todo", style: TextStyle(color: Colors.red)),
-                            ),
-                          ],
-                        ),
-                        ElevatedButton(
-                          onPressed: _procesarEmision,
-                          style: ElevatedButton.styleFrom(backgroundColor: const Color(0xff1a237e), minimumSize: const Size(double.infinity, 55)),
-                          child: Text(_tipoTramiteSugerido.toUpperCase(), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                        ),
-                        if (puedeReportarError) ...[
+                  if (_hasSearched) ...[
+                    _buildStatusIndicator(),
+                    const SizedBox(height: 20),
+                    Form(
+                      key: _formKey,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _buildField(_nombreController, "Nombre Completo", Icons.person),
                           const SizedBox(height: 15),
-                          Center(
-                            child: TextButton.icon(
-                              onPressed: _mostrarReporteError,
-                              icon: const Icon(Icons.error_outline, color: Colors.red),
-                              label: const Text("¿Hubo un error de impresión?", style: TextStyle(color: Colors.red)),
-                            ),
+                          _buildField(_codigoController, "Código", Icons.tag, enabled: false),
+                          const SizedBox(height: 15),
+                          DropdownButtonFormField<String>(
+                            value: _carreraSeleccionada,
+                            isExpanded: true,
+                            decoration: InputDecoration(labelText: "Carrera", border: OutlineInputBorder(borderRadius: BorderRadius.circular(12))),
+                            items: _carreras.map((c) => DropdownMenuItem(value: c, child: Text(c, style: const TextStyle(fontSize: 12)))).toList(),
+                            onChanged: (v) => setState(() => _carreraSeleccionada = v),
                           ),
-                        ]
-                      ],
+                          const SizedBox(height: 20),
+                          const Text("Firma Estudiante:", style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xff1a237e))),
+                          const SizedBox(height: 10),
+                          Container(
+                            decoration: BoxDecoration(border: Border.all(color: Colors.grey), borderRadius: BorderRadius.circular(12)),
+                            child: Signature(controller: _signatureController, height: 150, backgroundColor: Colors.grey.shade100),
+                          ),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Row(
+                                children: [
+                                  IconButton(
+                                    icon: const Icon(Icons.undo, color: Color(0xff1a237e)),
+                                    onPressed: () => _signatureController.undo(),
+                                    tooltip: "Deshacer último trazo",
+                                  ),
+                                  IconButton(
+                                    icon: const Icon(Icons.redo, color: Color(0xff1a237e)),
+                                    onPressed: () => _signatureController.redo(),
+                                    tooltip: "Rehacer",
+                                  ),
+                                ],
+                              ),
+                              TextButton.icon(
+                                onPressed: () => _signatureController.clear(),
+                                icon: const Icon(Icons.delete_outline, color: Colors.red),
+                                label: const Text("Borrar todo", style: TextStyle(color: Colors.red)),
+                              ),
+                            ],
+                          ),
+                          ElevatedButton(
+                            onPressed: _procesarEmision,
+                            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xff1a237e), minimumSize: const Size(double.infinity, 55)),
+                            child: Text(_tipoTramiteSugerido.toUpperCase(), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                          ),
+                          if (puedeReportarError) ...[
+                            const SizedBox(height: 15),
+                            Center(
+                              child: TextButton.icon(
+                                onPressed: _mostrarReporteError,
+                                icon: const Icon(Icons.error_outline, color: Colors.red),
+                                label: const Text("¿Hubo un error de impresión?", style: TextStyle(color: Colors.red)),
+                              ),
+                            ),
+                          ]
+                        ],
+                      ),
                     ),
-                  ),
-                ]
-              ],
+                  ]
+                ],
+              ),
             ),
-          ),
-        );
-      }
+          );
+        }
     );
   }
 

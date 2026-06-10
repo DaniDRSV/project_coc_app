@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 class InventoryScreen extends StatelessWidget {
   final String rol;
@@ -7,13 +8,17 @@ class InventoryScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return StreamBuilder<DocumentSnapshot>(
-        stream: FirebaseFirestore.instance.collection('configuracion').doc('permisos').snapshots(),
-        builder: (context, snapshotPermisos) {
-          var permisos = snapshotPermisos.data?.data() as Map<String, dynamic>? ?? {};
+    final uid = FirebaseAuth.instance.currentUser?.uid;
 
-          bool puedeCrear = rol == 'admin' || (permisos['perm_act_inv_crear'] ?? true);
-          bool puedeEditar = rol == 'admin' || (permisos['perm_act_inv_editar'] ?? true);
+    return StreamBuilder<DocumentSnapshot>(
+      // AHORA LEE DEL USUARIO DIRECTAMENTE
+        stream: FirebaseFirestore.instance.collection('usuarios').doc(uid).snapshots(),
+        builder: (context, snapshotUser) {
+          var userData = snapshotUser.data?.data() as Map<String, dynamic>? ?? {};
+          var permisos = userData['permisos'] as Map<String, dynamic>? ?? {};
+
+          bool puedeCrear = rol == 'admin' || (permisos['act_inv_crear'] ?? true);
+          bool puedeEditar = rol == 'admin' || (permisos['act_inv_editar'] ?? true);
 
           return Scaffold(
             appBar: AppBar(
@@ -33,7 +38,7 @@ class InventoryScreen extends StatelessWidget {
                     const Text("Stock en Bodega", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xff1a237e))),
                     const SizedBox(height: 10),
                     if (rol != 'admin' && !puedeEditar)
-                      const Text("⚠️ Solo lectura: No tienes permiso para modificar existencias.", style: TextStyle(fontSize: 12, color: Colors.orange)),
+                      const Text("No puedes modificar existencias.", style: TextStyle(fontSize: 12, color: Colors.orange)),
                     const SizedBox(height: 20),
                     ...snapshot.data!.docs.map((doc) => _buildInventoryCard(context, doc, puedeEditar)),
                   ],
@@ -77,7 +82,6 @@ class InventoryScreen extends StatelessWidget {
     );
   }
 
-  // --- INTERFAZ DEL DIÁLOGO MEJORADA (SIN OVERFLOW) ---
   void _showUpdateStockDialog(BuildContext context, DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
     int stockActual = data['cantidad'] ?? 0;
