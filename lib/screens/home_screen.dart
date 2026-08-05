@@ -29,52 +29,50 @@ class HomeScreen extends StatelessWidget {
     DateTime startOfDay = DateTime(now.year, now.month, now.day);
 
     return StreamBuilder<DocumentSnapshot>(
-      stream: FirebaseFirestore.instance.collection('usuarios').doc(user?.uid).snapshots(),
-      builder: (context, snapshotUser) {
-        if (!snapshotUser.hasData) return const Scaffold(body: Center(child: CircularProgressIndicator()));
-        
-        var userData = snapshotUser.data?.data() as Map<String, dynamic>? ?? {};
-        String userRole = userData['rol'] ?? 'operador';
-        String nombre = userData['nombre'] ?? 'Usuario';
-        String sedeUsuario = userData['sede'] ?? 'Sin sede';
+      // Este es el ÚNICO StreamBuilder que necesitamos ahora
+        stream: FirebaseFirestore.instance.collection('usuarios').doc(user?.uid).snapshots(),
+        builder: (context, snapshotUser) {
+          if (!snapshotUser.hasData) return const Scaffold(body: Center(child: CircularProgressIndicator()));
 
-        return StreamBuilder<DocumentSnapshot>(
-          stream: FirebaseFirestore.instance.collection('configuracion').doc('permisos').snapshots(),
-          builder: (context, snapshotPermisos) {
-            var permisos = snapshotPermisos.data?.data() as Map<String, dynamic>? ?? {};
-            
-            return Scaffold(
-              appBar: AppBar(
-                title: const Text("SISTEMA COC - UNIVO", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18)),
-                backgroundColor: const Color(0xff1a237e),
-                actions: [
-                  IconButton(
-                    icon: const Icon(Icons.account_circle, color: Colors.white),
-                    onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const ProfileScreen())),
-                    tooltip: "Mi Perfil",
+          var userData = snapshotUser.data?.data() as Map<String, dynamic>? ?? {};
+          String userRole = userData['rol'] ?? 'operador';
+          String nombre = userData['nombre'] ?? 'Usuario';
+          String sedeUsuario = userData['sede'] ?? 'Sin sede';
+
+          // AQUÍ extraemos los permisos individuales del usuario
+          Map<String, dynamic> permisosPersonales = userData['permisos'] ?? {};
+
+          return Scaffold(
+            appBar: AppBar(
+              title: const Text("SISTEMA COC - UNIVO", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18)),
+              backgroundColor: const Color(0xff1a237e),
+              actions: [
+                IconButton(
+                  icon: const Icon(Icons.account_circle, color: Colors.white),
+                  onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const ProfileScreen())),
+                  tooltip: "Mi Perfil",
+                ),
+                IconButton(icon: const Icon(Icons.logout, color: Colors.white), onPressed: () => _logout(context))
+              ],
+            ),
+            body: Column(
+              children: [
+                _buildHeader(userRole, nombre, sedeUsuario),
+                _buildStatsSection(user?.uid, startOfDay, sedeUsuario),
+                Expanded(
+                  child: GridView.count(
+                    crossAxisCount: MediaQuery.of(context).size.width > 800 ? 3 : 2,
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                    mainAxisSpacing: 15,
+                    crossAxisSpacing: 15,
+                    // Le pasamos los permisos individuales extraídos arriba
+                    children: _buildMenuItems(context, userRole, permisosPersonales, sedeUsuario),
                   ),
-                  IconButton(icon: const Icon(Icons.logout, color: Colors.white), onPressed: () => _logout(context))
-                ],
-              ),
-              body: Column(
-                children: [
-                  _buildHeader(userRole, nombre, sedeUsuario),
-                  _buildStatsSection(user?.uid, startOfDay, sedeUsuario),
-                  Expanded(
-                    child: GridView.count(
-                      crossAxisCount: MediaQuery.of(context).size.width > 800 ? 3 : 2,
-                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                      mainAxisSpacing: 15,
-                      crossAxisSpacing: 15,
-                      children: _buildMenuItems(context, userRole, permisos, sedeUsuario),
-                    ),
-                  ),
-                ],
-              ),
-            );
-          }
-        );
-      }
+                ),
+              ],
+            ),
+          );
+        }
     );
   }
 
@@ -83,8 +81,8 @@ class HomeScreen extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(25),
       decoration: const BoxDecoration(
-        color: Color(0xff1a237e), 
-        borderRadius: BorderRadius.only(bottomLeft: Radius.circular(30), bottomRight: Radius.circular(30))
+          color: Color(0xff1a237e),
+          borderRadius: BorderRadius.only(bottomLeft: Radius.circular(30), bottomRight: Radius.circular(30))
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -102,7 +100,6 @@ class HomeScreen extends StatelessWidget {
       padding: const EdgeInsets.all(15.0),
       child: Column(
         children: [
-          // Tarjeta Superior: Emisiones de HOY (Ancho Completo)
           StreamBuilder<QuerySnapshot>(
             stream: FirebaseFirestore.instance.collection('emisiones_log').where('fechaRegistro', isGreaterThanOrEqualTo: startOfDay).snapshots(),
             builder: (context, snapshot) {
@@ -116,9 +113,9 @@ class HomeScreen extends StatelessWidget {
                 }
               }).length;
               return _counterCard(
-                "Emisiones de Hoy", 
-                totalHoy.toString(), 
-                Colors.orange, 
+                "Emisiones de Hoy",
+                totalHoy.toString(),
+                Colors.orange,
                 "Emitidos en $sedeUsuario: $sedeHoy",
                 fullWidth: true,
               );
@@ -127,7 +124,6 @@ class HomeScreen extends StatelessWidget {
           const SizedBox(height: 12),
           Row(
             children: [
-              // Tarjeta Izquierda: Mis Emisiones
               Expanded(
                 child: StreamBuilder<QuerySnapshot>(
                   stream: FirebaseFirestore.instance.collection('emisiones_log').where('atendidoPorUid', isEqualTo: uid).snapshots(),
@@ -138,7 +134,6 @@ class HomeScreen extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 12),
-              // Tarjeta Derecha: Total Global UNIVO
               Expanded(
                 child: StreamBuilder<QuerySnapshot>(
                   stream: FirebaseFirestore.instance.collection('emisiones_log').snapshots(),
@@ -179,19 +174,20 @@ class HomeScreen extends StatelessWidget {
     );
   }
 
-  List<Widget> _buildMenuItems(BuildContext context, String rol, Map<String, dynamic> permisos, String sede) {
+  List<Widget> _buildMenuItems(BuildContext context, String rol, Map<String, dynamic> permisosPersonales, String sede) {
     List<Widget> items = [];
-    if (rol == 'admin' || (permisos['perm_mod_emision'] ?? true)) {
+
+    if (rol == 'admin' || (permisosPersonales['mod_emision'] ?? true)) {
       items.add(_menuCard(context, Icons.badge, "Emisión", "Registro de Carnet", Colors.indigo, () {
         Navigator.push(context, MaterialPageRoute(builder: (context) => StudentModuleScreen(rol: rol, sede: sede)));
       }));
     }
-    if (rol == 'admin' || (permisos['perm_mod_inventario'] ?? true)) {
+    if (rol == 'admin' || (permisosPersonales['mod_inventario'] ?? true)) {
       items.add(_menuCard(context, Icons.inventory_2, "Inventario", "Suministros", Colors.orange, () {
         Navigator.push(context, MaterialPageRoute(builder: (context) => InventoryScreen(rol: rol)));
       }));
     }
-    if (rol == 'admin' || (permisos['perm_mod_reportes'] ?? true)) {
+    if (rol == 'admin' || (permisosPersonales['mod_reportes'] ?? true)) {
       items.add(_menuCard(context, Icons.analytics, "Reportes", "Auditoría", Colors.teal, () {
         Navigator.push(context, MaterialPageRoute(builder: (context) => const ReportsScreen()));
       }));

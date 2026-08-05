@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../services/auth_service.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'home_screen.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -16,6 +17,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final TextEditingController _passwordController = TextEditingController();
   final AuthService _authService = AuthService();
   bool _isLoading = false;
+  bool _rememberMe = false;
 
   void _handleLogin() async {
     if (_formKey.currentState!.validate()) {
@@ -35,8 +37,8 @@ class _LoginScreenState extends State<LoginScreen> {
 
           if (userDoc.exists) {
             final data = userDoc.data() as Map<String, dynamic>?;
-            String estado = data?['estado'] ?? 'activo'; 
-            
+            String estado = data?['estado'] ?? 'activo';
+
             if (estado == 'inactivo') {
               await _authService.signOut();
               if (mounted) {
@@ -45,6 +47,10 @@ class _LoginScreenState extends State<LoginScreen> {
               }
               return;
             }
+
+            // Aquí guardamos EXCLUSIVAMENTE si debe mantener la sesión viva o no
+            SharedPreferences prefs = await SharedPreferences.getInstance();
+            await prefs.setBool('keep_session', _rememberMe);
 
             String rol = data?['rol'] ?? 'operador';
             if (mounted) {
@@ -163,25 +169,47 @@ class _LoginScreenState extends State<LoginScreen> {
                     decoration: const InputDecoration(labelText: 'Contraseña', prefixIcon: Icon(Icons.lock), border: OutlineInputBorder()),
                     validator: (value) => value!.isEmpty ? 'Ingrese su contraseña' : null,
                   ),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: TextButton(
-                      onPressed: _forgotPassword,
-                      child: const Text("¿Olvidó su contraseña?", style: TextStyle(color: Color(0xff1a237e), decoration: TextDecoration.underline)),
-                    ),
+
+                  // Wrap reemplaza al Row problemático.
+                  // Manda el botón de recuperar abajo si la pantalla es muy estrecha.
+                  Wrap(
+                    alignment: WrapAlignment.spaceBetween,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Checkbox(
+                            value: _rememberMe,
+                            activeColor: const Color(0xff1a237e),
+                            onChanged: (value) {
+                              setState(() {
+                                _rememberMe = value ?? false;
+                              });
+                            },
+                          ),
+                          const Text("Mantener sesión", style: TextStyle(fontSize: 13)),
+                        ],
+                      ),
+                      TextButton(
+                        onPressed: _forgotPassword,
+                        child: const Text("¿Olvidó su contraseña?", style: TextStyle(color: Color(0xff1a237e), decoration: TextDecoration.underline, fontSize: 13)),
+                      ),
+                    ],
                   ),
+
                   const SizedBox(height: 10),
                   _isLoading
                       ? const CircularProgressIndicator()
                       : SizedBox(
-                          width: double.infinity,
-                          height: 55,
-                          child: ElevatedButton(
-                            onPressed: _handleLogin,
-                            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xff1a237e), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
-                            child: const Text("Iniciar Sesión", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                          ),
-                        ),
+                    width: double.infinity,
+                    height: 55,
+                    child: ElevatedButton(
+                      onPressed: _handleLogin,
+                      style: ElevatedButton.styleFrom(backgroundColor: const Color(0xff1a237e), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+                      child: const Text("Iniciar Sesión", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                    ),
+                  ),
                 ],
               ),
             ),
