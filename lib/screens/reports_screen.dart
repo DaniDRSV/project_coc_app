@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -22,6 +23,8 @@ class _ReportsScreenState extends State<ReportsScreen> with SingleTickerProvider
   late TabController _tabController;
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = "";
+  final Color primaryBlue = const Color(0xff1a237e);
+  String? _selectedCicloName;
 
   DateTimeRange _selectedDateRange = DateTimeRange(
     start: DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day),
@@ -32,6 +35,7 @@ class _ReportsScreenState extends State<ReportsScreen> with SingleTickerProvider
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
+    _cargarCicloActivoInicial();
   }
 
   @override
@@ -41,9 +45,32 @@ class _ReportsScreenState extends State<ReportsScreen> with SingleTickerProvider
     super.dispose();
   }
 
+  void _cargarCicloActivoInicial() async {
+    try {
+      var snap = await FirebaseFirestore.instance
+          .collection('ciclos')
+          .where('activo', isEqualTo: true)
+          .limit(1)
+          .get();
+      if (snap.docs.isNotEmpty && mounted) {
+        var doc = snap.docs.first;
+        setState(() {
+          _selectedCicloName = doc['nombre'];
+          _selectedDateRange = DateTimeRange(
+            start: (doc['fechaInicio'] as Timestamp).toDate(),
+            end: (doc['fechaFin'] as Timestamp).toDate(),
+          );
+        });
+      }
+    } catch (e) {
+      debugPrint("Error cargando ciclo inicial: $e");
+    }
+  }
+
   void _applyQuickFilter(String filter) {
     DateTime now = DateTime.now();
     setState(() {
+      _selectedCicloName = null; // Al elegir rango rápido, se limpia el ciclo predefinido
       if (filter == 'Hoy') {
         _selectedDateRange = DateTimeRange(
           start: DateTime(now.year, now.month, now.day),
@@ -63,144 +90,30 @@ class _ReportsScreenState extends State<ReportsScreen> with SingleTickerProvider
     });
   }
 
-  void _seleccionarAno(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-          title: const Text("Seleccionar Año", style: TextStyle(color: Color(0xff1a237e), fontWeight: FontWeight.bold)),
-          content: SizedBox(
-            width: 300,
-            height: 300,
-            child: YearPicker(
-              firstDate: DateTime(2024),
-              lastDate: DateTime(DateTime.now().year + 5),
-              initialDate: DateTime.now(),
-              selectedDate: _selectedDateRange.start,
-              onChanged: (DateTime dateTime) {
-                setState(() {
-                  _selectedDateRange = DateTimeRange(
-                    start: DateTime(dateTime.year, 1, 1),
-                    end: DateTime(dateTime.year, 12, 31, 23, 59, 59),
-                  );
-                });
-                Navigator.pop(context);
-              },
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  void _mostrarDialogoReporteError(DocumentSnapshot emisionDoc) async {
-    var u = FirebaseAuth.instance.currentUser;
-    // AHORA LEE LOS PERMISOS DIRECTAMENTE DEL PERFIL
-    var userDoc = await FirebaseFirestore.instance.collection('usuarios').doc(u?.uid).get();
-    var userData = userDoc.data() ?? {};
-
-    String rol = userData['rol'] ?? 'operador';
-    String nombreOp = userData['nombre'] ?? 'Operador';
-    String sedeOp = userData['sede'] ?? 'Sin sede';
-    var permisos = userData['permisos'] as Map<String, dynamic>? ?? {};
-
-    bool puedeReportar = rol == 'admin' || (permisos['act_emi_error'] ?? true);
-
-    if (!puedeReportar) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("No tienes permiso para reportar errores.", style: TextStyle(fontWeight: FontWeight.bold)), backgroundColor: Colors.orange));
-      return;
-    }
-
-    final motivoCtrl = TextEditingController();
-    final cantidadCtrl = TextEditingController(text: "1");
-
-    var data = emisionDoc.data() as Map<String, dynamic>? ?? {};
-    String codigoEmision = data['codigo'] ?? 'S/C';
-
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-        title: Text("Reportar Error\n($codigoEmision)", style: const TextStyle(color: Color(0xff1a237e), fontWeight: FontWeight.bold)),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text("Por cada intento fallido, se descontará automáticamente 1 Tarjeta PVC del inventario. El ciclo de tinta gastado quedará registrado en la auditoría.", style: TextStyle(fontSize: 12, color: Colors.grey)),
-              const SizedBox(height: 15),
-              TextField(controller: motivoCtrl, decoration: const InputDecoration(labelText: "Motivo del error", border: OutlineInputBorder())),
-              const SizedBox(height: 15),
-              TextField(controller: cantidadCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: "Cantidad de intentos fallidos", border: OutlineInputBorder(), prefixIcon: Icon(Icons.error_outline))),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("CANCELAR")),
-          ElevatedButton.icon(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red.shade800, foregroundColor: Colors.white),
-            icon: const Icon(Icons.warning_amber),
-            label: const Text("REPORTAR"),
-            onPressed: () async {
-              if (motivoCtrl.text.isNotEmpty) {
-                int cantidad = int.tryParse(cantidadCtrl.text) ?? 0;
-
-                if (cantidad > 0) {
-                  await FirebaseFirestore.instance.collection('errores_impresion').add({
-                    'codigo': codigoEmision,
-                    'motivo': motivoCtrl.text.trim(),
-                    'material_perdido': cantidad,
-                    'fecha': FieldValue.serverTimestamp(),
-                    'reportadoPor': nombreOp,
-                    'atendidoPorUid': u?.uid,
-                    'sede': sedeOp,
-                  });
-
-                  await _descontarInventarioParcial('PVC', cantidad);
-
-                  if (mounted) {
-                    Navigator.pop(ctx);
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Error reportado y tarjeta PVC descontada", style: TextStyle(fontWeight: FontWeight.bold)), backgroundColor: Colors.green));
-                  }
-                }
-              }
-            },
-          )
-        ],
-      ),
-    );
-  }
-
-  Future<void> _descontarInventarioParcial(String terminoBusqueda, int cantidad) async {
-    try {
-      var snapshot = await FirebaseFirestore.instance.collection('inventario').get();
-      for (var doc in snapshot.docs) {
-        var data = doc.data() as Map<String, dynamic>? ?? {};
-        String nombreMaterial = (data['nombre'] ?? '').toString().toUpperCase();
-        if (nombreMaterial.contains(terminoBusqueda.toUpperCase())) {
-          await doc.reference.update({'cantidad': FieldValue.increment(-cantidad)});
-        }
-      }
-    } catch (e) {
-      print("Error ajustando inventario: $e");
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: Colors.grey.shade50,
       appBar: AppBar(
-        title: const Text("Auditoría y Reportes"),
-        backgroundColor: const Color(0xff1a237e),
+        title: const Text("Auditoría y Reportes", style: TextStyle(fontWeight: FontWeight.bold)),
+        backgroundColor: primaryBlue,
         foregroundColor: Colors.white,
+        elevation: 0,
         bottom: TabBar(
           controller: _tabController,
           indicatorColor: Colors.white,
-          tabs: const [Tab(text: "Emisiones"), Tab(text: "Errores")],
+          indicatorWeight: 4,
+          labelColor: Colors.white,
+          unselectedLabelColor: Colors.white70,
+          tabs: const [
+            Tab(icon: Icon(Icons.badge), text: "Emisiones"),
+            Tab(icon: Icon(Icons.error_outline), text: "Errores"),
+          ],
         ),
       ),
       body: Column(
         children: [
+          _buildCycleDropdown(),
           _buildQuickFilters(),
           _buildSearchBar(),
           _buildFilterBanner(),
@@ -215,47 +128,109 @@ class _ReportsScreenState extends State<ReportsScreen> with SingleTickerProvider
           ),
         ],
       ),
-      // AHORA LOS BOTONES EXCEL Y PDF VERIFICAN PERMISOS
       floatingActionButton: StreamBuilder<DocumentSnapshot>(
           stream: FirebaseFirestore.instance.collection('usuarios').doc(FirebaseAuth.instance.currentUser?.uid).snapshots(),
-          builder: (context, snapshot) {
-            var data = snapshot.data?.data() as Map<String, dynamic>? ?? {};
-            String rol = data['rol'] ?? 'operador';
-            var permisos = data['permisos'] as Map<String, dynamic>? ?? {};
+          builder: (context, snapshotUser) {
+            var userData = snapshotUser.data?.data() as Map<String, dynamic>? ?? {};
+            String rol = userData['rol'] ?? 'operador';
 
-            bool canExcel = rol == 'admin' || (permisos['act_excel'] ?? true);
-            bool canPdf = rol == 'admin' || (permisos['act_pdf'] ?? true);
+            return StreamBuilder<DocumentSnapshot>(
+              stream: FirebaseFirestore.instance.collection('configuracion').doc('permisos').snapshots(),
+              builder: (context, snapshotPermisos) {
+                var permisosGlobales = snapshotPermisos.data?.data() as Map<String, dynamic>? ?? {};
 
-            return Column(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                if (canExcel)
-                  FloatingActionButton.extended(
-                    heroTag: "btn_ex",
-                    onPressed: () => _showExportPreview("Excel"),
-                    backgroundColor: Colors.green.shade800,
-                    icon: const Icon(Icons.table_view, color: Colors.white),
-                    label: const Text("EXCEL", style: TextStyle(color: Colors.white)),
-                  ),
-                if (canExcel && canPdf) const SizedBox(height: 10),
-                if (canPdf)
-                  FloatingActionButton.extended(
-                    heroTag: "btn_pd",
-                    onPressed: () => _showExportPreview("PDF"),
-                    backgroundColor: Colors.red.shade800,
-                    icon: const Icon(Icons.picture_as_pdf, color: Colors.white),
-                    label: const Text("PDF", style: TextStyle(color: Colors.white)),
-                  ),
-              ],
+                // Sincronización con las llaves globales correctas del panel de políticas
+                bool canExcel = rol == 'admin' || (permisosGlobales['perm_act_excel'] ?? true);
+                bool canPdf = rol == 'admin' || (permisosGlobales['perm_act_pdf'] ?? true);
+
+                if (!canExcel && !canPdf) return const SizedBox.shrink();
+
+                return Column(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    if (canExcel)
+                      FloatingActionButton.extended(
+                        heroTag: "btn_ex",
+                        onPressed: () => _showExportPreview("Excel"),
+                        backgroundColor: Colors.green.shade800,
+                        icon: const Icon(Icons.table_view, color: Colors.white),
+                        label: const Text("EXCEL", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                      ),
+                    if (canExcel && canPdf) const SizedBox(height: 10),
+                    if (canPdf)
+                      FloatingActionButton.extended(
+                        heroTag: "btn_pd",
+                        onPressed: () => _showExportPreview("PDF"),
+                        backgroundColor: Colors.red.shade800,
+                        icon: const Icon(Icons.picture_as_pdf, color: Colors.white),
+                        label: const Text("PDF", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                      ),
+                  ],
+                );
+              }
             );
           }
       ),
     );
   }
 
+  Widget _buildCycleDropdown() {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(15, 12, 15, 4),
+      color: Colors.white,
+      child: StreamBuilder<QuerySnapshot>(
+        stream: FirebaseFirestore.instance.collection('ciclos').orderBy('fechaInicio', descending: true).snapshots(),
+        builder: (context, snapshot) {
+          if (!snapshot.hasData) return const LinearProgressIndicator();
+          var docs = snapshot.data!.docs;
+
+          return DropdownButtonFormField<String>(
+            value: _selectedCicloName,
+            decoration: InputDecoration(
+              labelText: "Filtrar por Ciclo Académico",
+              prefixIcon: const Icon(Icons.calendar_month, color: Color(0xff1a237e)),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            hint: const Text("Seleccione un ciclo escolar"),
+            items: [
+              const DropdownMenuItem<String>(
+                value: null,
+                child: Text("Rango de fecha libre / Personalizado"),
+              ),
+              ...docs.map((doc) {
+                return DropdownMenuItem<String>(
+                  value: doc['nombre'].toString(),
+                  child: Text(doc['nombre'].toString()),
+                );
+              })
+            ],
+            onChanged: (value) {
+              if (value == null) {
+                setState(() {
+                  _selectedCicloName = null;
+                });
+              } else {
+                var selectedDoc = docs.firstWhere((d) => d['nombre'] == value);
+                setState(() {
+                  _selectedCicloName = value;
+                  _selectedDateRange = DateTimeRange(
+                    start: (selectedDoc['fechaInicio'] as Timestamp).toDate(),
+                    end: (selectedDoc['fechaFin'] as Timestamp).toDate(),
+                  );
+                });
+              }
+            },
+          );
+        },
+      ),
+    );
+  }
+
   Widget _buildQuickFilters() {
     return Container(
-      padding: const EdgeInsets.symmetric(vertical: 10),
+      padding: const EdgeInsets.symmetric(vertical: 6),
       color: Colors.white,
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
@@ -263,18 +238,26 @@ class _ReportsScreenState extends State<ReportsScreen> with SingleTickerProvider
           _filterChip('Hoy'),
           _filterChip('Semana'),
           _filterChip('Mes'),
-          ActionChip(
-            label: const Text('Año'),
-            onPressed: () => _seleccionarAno(context),
-            backgroundColor: Colors.indigo.shade50,
-            labelStyle: const TextStyle(color: Color(0xff1a237e), fontWeight: FontWeight.bold),
-          ),
           IconButton(
-            icon: const Icon(Icons.date_range, color: Color(0xff1a237e)),
+            icon: Icon(Icons.date_range, color: primaryBlue),
+            tooltip: "Seleccionar rango de fechas",
             onPressed: () async {
-              final picked = await showDateRangePicker(context: context, firstDate: DateTime(2024), lastDate: DateTime.now());
+              final picked = await showDateRangePicker(
+                  context: context,
+                  firstDate: DateTime(2024),
+                  lastDate: DateTime.now().add(const Duration(days: 365)),
+                  builder: (context, child) {
+                    return Theme(
+                      data: Theme.of(context).copyWith(
+                        colorScheme: ColorScheme.light(primary: primaryBlue),
+                      ),
+                      child: child!,
+                    );
+                  }
+              );
               if (picked != null) {
                 setState(() {
+                  _selectedCicloName = null; // Rango personalizado limpia selección de ciclo
                   _selectedDateRange = DateTimeRange(
                     start: picked.start,
                     end: DateTime(picked.end.year, picked.end.month, picked.end.day, 23, 59, 59),
@@ -288,33 +271,35 @@ class _ReportsScreenState extends State<ReportsScreen> with SingleTickerProvider
     );
   }
 
-  Widget _buildSearchBar() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 5),
-      child: TextField(
-        controller: _searchController,
-        textCapitalization: TextCapitalization.characters,
-        decoration: InputDecoration(
-          hintText: "Filtrar por Código de Estudiante",
-          prefixIcon: const Icon(Icons.search, color: Color(0xff1a237e)),
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-          contentPadding: const EdgeInsets.symmetric(vertical: 0),
-        ),
-        onChanged: (value) {
-          setState(() {
-            _searchQuery = value.trim().toUpperCase();
-          });
-        },
-      ),
-    );
-  }
-
   Widget _filterChip(String label) {
     return ActionChip(
       label: Text(label),
       onPressed: () => _applyQuickFilter(label),
       backgroundColor: Colors.indigo.shade50,
-      labelStyle: const TextStyle(color: Color(0xff1a237e), fontWeight: FontWeight.bold),
+      side: BorderSide.none,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      labelStyle: TextStyle(color: primaryBlue, fontWeight: FontWeight.bold, fontSize: 13),
+    );
+  }
+
+  Widget _buildSearchBar() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 6),
+      child: Card(
+        elevation: 2,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+        child: TextField(
+          controller: _searchController,
+          textCapitalization: TextCapitalization.characters,
+          decoration: InputDecoration(
+            hintText: "Filtrar por Código (ej: U2021...)",
+            prefixIcon: Icon(Icons.search, color: primaryBlue),
+            border: InputBorder.none,
+            contentPadding: const EdgeInsets.symmetric(vertical: 12),
+          ),
+          onChanged: (value) => setState(() => _searchQuery = value.trim().toUpperCase()),
+        ),
+      ),
     );
   }
 
@@ -322,11 +307,22 @@ class _ReportsScreenState extends State<ReportsScreen> with SingleTickerProvider
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(12),
-      color: const Color(0xff1a237e),
-      child: Text(
-        "Rango: ${DateFormat('dd/MM/yy').format(_selectedDateRange.start)} al ${DateFormat('dd/MM/yy').format(_selectedDateRange.end)}",
-        textAlign: TextAlign.center,
-        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+      color: primaryBlue,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(Icons.event_note, color: Colors.white70, size: 16),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(
+              _selectedCicloName != null
+                  ? "Ciclo: $_selectedCicloName (${DateFormat('dd/MM/yy').format(_selectedDateRange.start)} al ${DateFormat('dd/MM/yy').format(_selectedDateRange.end)})"
+                  : "Periodo: ${DateFormat('dd/MM/yy').format(_selectedDateRange.start)} al ${DateFormat('dd/MM/yy').format(_selectedDateRange.end)}",
+              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -348,28 +344,213 @@ class _ReportsScreenState extends State<ReportsScreen> with SingleTickerProvider
           }).toList();
         }
 
-        if (docs.isEmpty) return const Center(child: Text("Sin datos en este rango o búsqueda"));
+        if (docs.isEmpty) return Center(child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.search_off, size: 60, color: Colors.grey.shade400),
+            const SizedBox(height: 10),
+            Text("Sin registros en este periodo", style: TextStyle(color: Colors.grey.shade500)),
+          ],
+        ));
 
         return ListView.builder(
           itemCount: docs.length,
+          padding: const EdgeInsets.only(top: 10, bottom: 80),
           itemBuilder: (context, index) {
             var doc = docs[index];
             var data = doc.data() as Map<String, dynamic>? ?? {};
-            DateTime fecha = data[field] != null ? (data[field] as Timestamp).toDate() : DateTime.now();
+            DateTime fecha = DateTime.now();
+            if (data[field] is Timestamp) {
+              fecha = (data[field] as Timestamp).toDate();
+            }
+            String? cicloReg = data['ciclo'];
 
             return Card(
-              margin: const EdgeInsets.symmetric(horizontal: 15, vertical: 5),
+              margin: const EdgeInsets.symmetric(horizontal: 15, vertical: 6),
+              elevation: 2,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
               child: ListTile(
-                title: Text(data['codigo']?.toString() ?? 'S/C', style: const TextStyle(fontWeight: FontWeight.bold)),
-                subtitle: Text("${data[coll == 'emisiones_log' ? 'nombre' : 'motivo'] ?? 'Dato no disponible'}"),
-                trailing: Text(DateFormat('dd/MM HH:mm').format(fecha)),
-                onTap: coll == 'emisiones_log' ? () => _mostrarDialogoReporteError(doc) : null,
+                leading: CircleAvatar(
+                  backgroundColor: coll == 'emisiones_log' ? Colors.green.shade50 : Colors.red.shade50,
+                  child: Icon(
+                    coll == 'emisiones_log' ? Icons.check_circle_outline : Icons.error_outline,
+                    color: coll == 'emisiones_log' ? Colors.green : Colors.red,
+                  ),
+                ),
+                title: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        data['codigo']?.toString() ?? 'S/C', 
+                        style: const TextStyle(fontWeight: FontWeight.bold)
+                      ),
+                    ),
+                    if (cicloReg != null)
+                      Text(
+                        cicloReg,
+                        style: TextStyle(fontSize: 11, color: primaryBlue, fontWeight: FontWeight.w600),
+                      ),
+                  ],
+                ),
+                subtitle: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(coll == 'emisiones_log' ? (data['nombre'] ?? '') : (data['motivo'] ?? '')),
+                    if (coll == 'errores_impresion' && data['material_perdido'] != null)
+                      Text(
+                        "Material perdido: ${data['material_perdido']} PVC",
+                        style: TextStyle(fontSize: 11, color: Colors.red.shade700, fontWeight: FontWeight.w500),
+                      ),
+                  ],
+                ),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (coll == 'emisiones_log')
+                      IconButton(
+                        icon: const Icon(Icons.report_gmailerrorred_rounded, color: Colors.orange),
+                        onPressed: () => _showReportErrorDialog(context, data),
+                        tooltip: "Reportar Error",
+                      ),
+                    const SizedBox(width: 4),
+                    Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Text(DateFormat('dd/MM').format(fecha), style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                        Text(DateFormat('HH:mm').format(fecha), style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                      ],
+                    ),
+                  ],
+                ),
               ),
             );
           },
         );
       },
     );
+  }
+
+  void _showReportErrorDialog(BuildContext context, Map<String, dynamic> emissionData) async {
+    final motivoController = TextEditingController();
+    final materialController = TextEditingController(text: "1");
+    final currentUser = FirebaseAuth.instance.currentUser;
+    
+    String reporterName = "Operador";
+    String reporterSede = "Sin sede";
+    try {
+      var userDoc = await FirebaseFirestore.instance.collection('usuarios').doc(currentUser?.uid).get();
+      if (userDoc.exists) {
+        reporterName = userDoc.get('nombre') ?? "Operador";
+        reporterSede = userDoc.get('sede') ?? "Sin sede";
+      }
+    } catch (_) {}
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: [
+            Icon(Icons.report_problem_rounded, color: Colors.orange),
+            SizedBox(width: 10),
+            Text("Reportar Incidencia", style: TextStyle(fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text("Se registrará un error para el estudiante:", style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+              const SizedBox(height: 4),
+              Text("${emissionData['nombre']} (${emissionData['codigo']})", 
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+              const Divider(height: 30),
+              TextField(
+                controller: motivoController,
+                decoration: InputDecoration(
+                  labelText: "Motivo del error",
+                  hintText: "Ej: Fallo de impresión, Cinta rota...",
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+              ),
+              const SizedBox(height: 15),
+              TextField(
+                controller: materialController,
+                keyboardType: TextInputType.number,
+                decoration: InputDecoration(
+                  labelText: "Tarjetas PVC desperdiciadas",
+                  helperText: "Cantidad de tarjetas que se perdieron",
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text("CANCELAR")),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.orange.shade800,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            onPressed: () async {
+              if (motivoController.text.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Indique el motivo")));
+                return;
+              }
+              
+              int materialPerdido = int.tryParse(materialController.text) ?? 1;
+
+              try {
+                await FirebaseFirestore.instance.collection('errores_impresion').add({
+                  'atendidoPorUid': currentUser?.uid,
+                  'codigo': emissionData['codigo'],
+                  'fecha': FieldValue.serverTimestamp(),
+                  'material_perdido': materialPerdido,
+                  'motivo': motivoController.text.trim(),
+                  'reportadoPor': reporterName,
+                  'sede': reporterSede,
+                });
+
+                await _descontarInventario(materialPerdido);
+
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text("Error registrado y stock actualizado (-$materialPerdido)"), 
+                    backgroundColor: Colors.orange[800]
+                  ),
+                );
+              } catch (e) {
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error al reportar: $e")));
+              }
+            },
+            child: const Text("GUARDAR REPORTE"),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _descontarInventario(int cantidad) async {
+    try {
+      var snapshot = await FirebaseFirestore.instance
+          .collection('inventario')
+          .where('nombre', isEqualTo: 'Tarjetas PVC')
+          .limit(1)
+          .get();
+      if (snapshot.docs.isNotEmpty) {
+        var doc = snapshot.docs.first;
+        int stockActual = doc.get('cantidad') ?? 0;
+        await doc.reference.update({'cantidad': stockActual - cantidad});
+      }
+    } catch (e) {
+      debugPrint("Error descontando inventario en reporte de error: $e");
+    }
   }
 
   void _showExportPreview(String format) async {
@@ -389,7 +570,6 @@ class _ReportsScreenState extends State<ReportsScreen> with SingleTickerProvider
         var data = doc.data() as Map<String, dynamic>? ?? {};
         return (data['codigo'] ?? '').toString().toUpperCase().contains(_searchQuery);
       }).toList();
-
       docsErrores = docsErrores.where((doc) {
         var data = doc.data() as Map<String, dynamic>? ?? {};
         return (data['codigo'] ?? '').toString().toUpperCase().contains(_searchQuery);
@@ -404,87 +584,186 @@ class _ReportsScreenState extends State<ReportsScreen> with SingleTickerProvider
 
     int totalMaterialUsado = docsEmisiones.length + materialPerdido;
 
+    if (format == "Excel") {
+      _showExcelPreview(docsEmisiones, totalMaterialUsado);
+    } else {
+      _showPdfConfirmDialog(docsEmisiones, docsErrores, totalMaterialUsado);
+    }
+  }
+
+  void _showExcelPreview(List<DocumentSnapshot> docs, int totalMaterial) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text("Resumen de Auditoría ($format)"),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text("Filtro aplicado: ${_searchQuery.isEmpty ? 'Todos' : _searchQuery}", style: const TextStyle(fontWeight: FontWeight.bold)),
-            const SizedBox(height: 10),
-            Text("Emisiones Exitosas: ${docsEmisiones.length}", style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold)),
-            Text("Errores Registrados: ${docsErrores.length}", style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
-            const Divider(),
-            const Text("CONSUMO REAL DE MATERIAL:", style: TextStyle(fontWeight: FontWeight.bold)),
-            Text("- Total Tarjetas PVC: $totalMaterialUsado"),
-            Text("- Total Ciclos Cinta: $totalMaterialUsado"),
-            const SizedBox(height: 10),
-            const Text("¿Generar archivo de reporte?", style: TextStyle(fontSize: 12, color: Colors.grey)),
-          ],
+        title: Text("Vista Previa Excel", style: TextStyle(color: primaryBlue, fontWeight: FontWeight.bold)),
+        content: SizedBox(
+          width: MediaQuery.of(context).size.width * 0.8,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text("Total registros a exportar: ${docs.length}"),
+              if (_selectedCicloName != null) ...[
+                const SizedBox(height: 4),
+                Text("Ciclo Académico: $_selectedCicloName", style: const TextStyle(fontWeight: FontWeight.w600, color: Colors.indigo)),
+              ],
+              const SizedBox(height: 10),
+              Flexible(
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: SingleChildScrollView(
+                    child: DataTable(
+                      columns: const [
+                        DataColumn(label: Text('Código')),
+                        DataColumn(label: Text('Nombre')),
+                        DataColumn(label: Text('Sede')),
+                        DataColumn(label: Text('Operador')),
+                      ],
+                      rows: docs.take(10).map((doc) {
+                        var data = doc.data() as Map<String, dynamic>? ?? {};
+                        return DataRow(cells: [
+                          DataCell(Text(data['codigo']?.toString() ?? '')),
+                          DataCell(Text(data['nombre']?.toString() ?? '')),
+                          DataCell(Text(data['sede']?.toString() ?? '')),
+                          DataCell(Text(data['atendidoPor']?.toString() ?? '')),
+                        ]);
+                      }).toList(),
+                    ),
+                  ),
+                ),
+              ),
+              if (docs.length > 10) Padding(
+                padding: const EdgeInsets.all(8.0),
+                child: Text("... y ${docs.length - 10} registros más", style: const TextStyle(fontSize: 12, fontStyle: FontStyle.italic)),
+              ),
+              const Divider(),
+              Text("Consumo estimado: $totalMaterial PVC", style: const TextStyle(fontWeight: FontWeight.bold)),
+            ],
+          ),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context), child: const Text("CANCELAR")),
-          ElevatedButton(
-              onPressed: () {
-                Navigator.pop(context);
-                format == "PDF"
-                    ? _generatePdf(docsEmisiones, totalMaterialUsado)
-                    : _generateExcel(docsEmisiones, totalMaterialUsado);
-              },
-              child: const Text("GENERAR")
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.green.shade800),
+            icon: const Icon(Icons.share, color: Colors.white),
+            label: const Text("COMPARTIR EXCEL", style: TextStyle(color: Colors.white)),
+            onPressed: () {
+              Navigator.pop(context);
+              _generateExcel(docs, totalMaterial);
+            },
           ),
         ],
       ),
     );
   }
 
-  Future<void> _generatePdf(List<DocumentSnapshot> e, int totalMaterial) async {
+  void _showPdfConfirmDialog(List<DocumentSnapshot> emi, List<DocumentSnapshot> err, int total) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text("Generar Reporte PDF", style: TextStyle(color: primaryBlue, fontWeight: FontWeight.bold)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text("Emisiones: ${emi.length}"),
+            Text("Errores: ${err.length}"),
+            Text("Total PVC usado: $total"),
+            if (_selectedCicloName != null) ...[
+              const SizedBox(height: 8),
+              Text("Ciclo Académico Seleccionado: $_selectedCicloName", style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.indigo)),
+            ],
+            const SizedBox(height: 10),
+            const Text("El PDF se generará en formato horizontal para incluir las firmas."),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text("CANCELAR")),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red.shade800),
+            onPressed: () {
+              Navigator.pop(context);
+              _generatePdf(emi, total);
+            },
+            child: const Text("GENERAR PDF", style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _generatePdf(List<DocumentSnapshot> emissions, int totalMaterial) async {
     final pdf = pw.Document();
+
     pdf.addPage(pw.MultiPage(
+      pageFormat: PdfPageFormat.a4.landscape, // Orientación horizontal
+      margin: const pw.EdgeInsets.all(32),
       build: (pw.Context context) => [
-        pw.Header(level: 0, child: pw.Text("REPORTE COC UNIVO - AUDITORÍA")),
-        pw.Text("Periodo: ${DateFormat('dd/MM/yy').format(_selectedDateRange.start)} - ${DateFormat('dd/MM/yy').format(_selectedDateRange.end)}"),
-        if (_searchQuery.isNotEmpty) pw.Text("Filtro de búsqueda: $_searchQuery"),
-        pw.SizedBox(height: 20),
+        pw.Header(level: 0, child: pw.Text("REPORTE OFICIAL COC UNIVO - AUDITORÍA DE MATERIALES")),
+        pw.Text(_selectedCicloName != null 
+            ? "Ciclo Académico Seleccionado: $_selectedCicloName" 
+            : "Periodo: ${DateFormat('dd/MM/yy').format(_selectedDateRange.start)} al ${DateFormat('dd/MM/yy').format(_selectedDateRange.end)}"),
+        pw.SizedBox(height: 15),
         pw.Text("RESUMEN DE CONSUMO:", style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
         pw.Bullet(text: "Total Tarjetas PVC Usadas: $totalMaterial"),
-        pw.Bullet(text: "Total Ciclos de Cinta Usados: $totalMaterial"),
-        pw.Bullet(text: "Emisiones Exitosas: ${e.length}"),
-        pw.SizedBox(height: 20),
+        pw.Bullet(text: "Emisiones Exitosas: ${emissions.length}"),
+        pw.SizedBox(height: 15),
 
         pw.Table(
-            border: pw.TableBorder.all(color: PdfColors.grey400),
+            border: pw.TableBorder.all(color: PdfColors.grey300),
+            columnWidths: {
+              0: const pw.FlexColumnWidth(1),
+              1: const pw.FlexColumnWidth(2),
+              2: const pw.FlexColumnWidth(2), // Carrera
+              3: const pw.FlexColumnWidth(1.5), // Trámite
+              4: const pw.FlexColumnWidth(1), // Sede
+              5: const pw.FlexColumnWidth(1.5), // Operador
+              6: const pw.FlexColumnWidth(1.2), // Fecha
+              7: const pw.FlexColumnWidth(1.5), // Espacio para firma
+            },
             children: [
               pw.TableRow(
-                decoration: const pw.BoxDecoration(color: PdfColors.grey200),
-                children: [
-                  pw.Padding(padding: const pw.EdgeInsets.all(5), child: pw.Text('Código', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 10))),
-                  pw.Padding(padding: const pw.EdgeInsets.all(5), child: pw.Text('Nombre', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 10))),
-                  pw.Padding(padding: const pw.EdgeInsets.all(5), child: pw.Text('Operador', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 10))),
-                  pw.Padding(padding: const pw.EdgeInsets.all(5), child: pw.Text('Fecha', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 10))),
-                  pw.Padding(padding: const pw.EdgeInsets.all(5), child: pw.Text('Firma', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 10))),
-                ],
+                  decoration: const pw.BoxDecoration(color: PdfColors.indigo),
+                  children: [
+                    _pdfCell("Código", isHeader: true),
+                    _pdfCell("Nombre", isHeader: true),
+                    _pdfCell("Carrera", isHeader: true),
+                    _pdfCell("Trámite", isHeader: true),
+                    _pdfCell("Sede", isHeader: true),
+                    _pdfCell("Operador", isHeader: true),
+                    _pdfCell("Fecha", isHeader: true),
+                    _pdfCell("Firma", isHeader: true),
+                  ]
               ),
-              ...e.map((doc) {
+              ...emissions.map((doc) {
                 var data = doc.data() as Map<String, dynamic>? ?? {};
-                pw.Widget firmaWidget = pw.SizedBox();
+                Uint8List? signatureBytes;
                 if (data['firma'] != null) {
                   try {
-                    firmaWidget = pw.Image(pw.MemoryImage(base64Decode(data['firma'])), width: 40, height: 20);
+                    signatureBytes = base64Decode(data['firma']);
                   } catch (_) {}
                 }
 
-                DateTime fecha = data['fechaRegistro'] != null ? (data['fechaRegistro'] as Timestamp).toDate() : DateTime.now();
+                String formattedDate = '';
+                if (data['fechaRegistro'] is Timestamp) {
+                  formattedDate = DateFormat('dd/MM HH:mm').format((data['fechaRegistro'] as Timestamp).toDate());
+                }
 
                 return pw.TableRow(
+                    verticalAlignment: pw.TableCellVerticalAlignment.middle,
                     children: [
-                      pw.Padding(padding: const pw.EdgeInsets.all(5), child: pw.Text(data['codigo']?.toString() ?? '', style: const pw.TextStyle(fontSize: 10))),
-                      pw.Padding(padding: const pw.EdgeInsets.all(5), child: pw.Text(data['nombre']?.toString() ?? '', style: const pw.TextStyle(fontSize: 10))),
-                      pw.Padding(padding: const pw.EdgeInsets.all(5), child: pw.Text(data['atendidoPor']?.toString() ?? '', style: const pw.TextStyle(fontSize: 10))),
-                      pw.Padding(padding: const pw.EdgeInsets.all(5), child: pw.Text(DateFormat('dd/MM/yyyy').format(fecha), style: const pw.TextStyle(fontSize: 10))),
-                      pw.Padding(padding: const pw.EdgeInsets.all(5), child: pw.Center(child: firmaWidget)),
+                      _pdfCell(data['codigo']?.toString() ?? ''),
+                      _pdfCell(data['nombre']?.toString() ?? ''),
+                      _pdfCell(data['carrera']?.toString() ?? ''),
+                      _pdfCell((data['typeTramite'] ?? data['tipoTramite'] ?? '').toString()),
+                      _pdfCell(data['sede']?.toString() ?? ''),
+                      _pdfCell(data['atendidoPor']?.toString() ?? ''),
+                      _pdfCell(formattedDate),
+                      signatureBytes != null
+                          ? pw.Padding(
+                          padding: const pw.EdgeInsets.all(2),
+                          child: pw.Image(pw.MemoryImage(signatureBytes), height: 25)
+                      )
+                          : _pdfCell("Sin firma"),
                     ]
                 );
               }).toList(),
@@ -495,39 +774,70 @@ class _ReportsScreenState extends State<ReportsScreen> with SingleTickerProvider
     await Printing.layoutPdf(onLayout: (PdfPageFormat format) async => pdf.save());
   }
 
-  Future<void> _generateExcel(List<DocumentSnapshot> e, int totalMaterial) async {
+  pw.Widget _pdfCell(String text, {bool isHeader = false}) {
+    return pw.Padding(
+      padding: const pw.EdgeInsets.all(5),
+      child: pw.Text(
+        text,
+        style: pw.TextStyle(
+          fontSize: 8,
+          color: isHeader ? PdfColors.white : PdfColors.black,
+          fontWeight: isHeader ? pw.FontWeight.bold : pw.FontWeight.normal,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _generateExcel(List<DocumentSnapshot> emissions, int totalMaterial) async {
     var excel = Excel.createExcel();
-    Sheet s = excel['Reporte Auditoria'];
+    Sheet sheet = excel['Auditoria'];
     excel.delete('Sheet1');
 
-    s.appendRow([TextCellValue('REPORTE COC UNIVO - AUDITORÍA DE MATERIALES')]);
-    s.appendRow([TextCellValue('Periodo: ${DateFormat('dd/MM/yy').format(_selectedDateRange.start)} al ${DateFormat('dd/MM/yy').format(_selectedDateRange.end)}')]);
-    if (_searchQuery.isNotEmpty) s.appendRow([TextCellValue('Filtro de búsqueda: $_searchQuery')]);
-    s.appendRow([]);
+    sheet.appendRow([TextCellValue('REPORTE COC UNIVO - AUDITORÍA DE MATERIALES')]);
+    if (_selectedCicloName != null) {
+      sheet.appendRow([TextCellValue('Ciclo Académico Seleccionado: $_selectedCicloName')]);
+    } else {
+      sheet.appendRow([TextCellValue('Periodo: ${DateFormat('dd/MM/yy').format(_selectedDateRange.start)} al ${DateFormat('dd/MM/yy').format(_selectedDateRange.end)}')]);
+    }
+    sheet.appendRow([]);
 
-    s.appendRow([TextCellValue('CÓDIGO'), TextCellValue('ESTUDIANTE'), TextCellValue('TRÁMITE'), TextCellValue('OPERADOR'), TextCellValue('FECHA')]);
-    for (var doc in e) {
+    sheet.appendRow([
+      TextCellValue('CÓDIGO'),
+      TextCellValue('ESTUDIANTE'),
+      TextCellValue('CARRERA'),
+      TextCellValue('TRAMITE'),
+      TextCellValue('SEDE'),
+      TextCellValue('OPERADOR'),
+      TextCellValue('FECHA'),
+      TextCellValue('CICLO REGISTRADO')
+    ]);
+
+    for (var doc in emissions) {
       var data = doc.data() as Map<String, dynamic>? ?? {};
-      DateTime fecha = data['fechaRegistro'] != null ? (data['fechaRegistro'] as Timestamp).toDate() : DateTime.now();
-
-      s.appendRow([
+      String formattedDate = '';
+      if (data['fechaRegistro'] is Timestamp) {
+        formattedDate = DateFormat('dd/MM/yy HH:mm').format((data['fechaRegistro'] as Timestamp).toDate());
+      }
+      sheet.appendRow([
         TextCellValue(data['codigo']?.toString() ?? ''),
         TextCellValue(data['nombre']?.toString() ?? ''),
-        TextCellValue(data['tipoTramite']?.toString() ?? ''),
+        TextCellValue(data['carrera']?.toString() ?? ''),
+        TextCellValue((data['tipoTramite'] ?? data['typeTramite'] ?? '').toString()),
+        TextCellValue(data['sede']?.toString() ?? ''),
         TextCellValue(data['atendidoPor']?.toString() ?? ''),
-        TextCellValue(DateFormat('dd/MM/yy HH:mm').format(fecha)),
+        TextCellValue(formattedDate),
+        TextCellValue(data['ciclo']?.toString() ?? 'N/A'),
       ]);
     }
 
-    s.appendRow([]);
-    s.appendRow([TextCellValue('RESUMEN DE CONSUMO')]);
-    s.appendRow([TextCellValue('Total Tarjetas PVC Usadas:'), TextCellValue(totalMaterial.toString())]);
-    s.appendRow([TextCellValue('Total Ciclos Cinta Usados:'), TextCellValue(totalMaterial.toString())]);
+    sheet.appendRow([]);
+    sheet.appendRow([TextCellValue('RESUMEN DE CONSUMO DE MATERIAL')]);
+    sheet.appendRow([TextCellValue('Tarjetas PVC (Éxitos + Errores):'), TextCellValue(totalMaterial.toString())]);
 
-    var bytes = excel.save();
-    final dir = await getTemporaryDirectory();
-    final path = "${dir.path}/Reporte_Auditoria.xlsx";
-    File(path)..createSync(recursive: true)..writeAsBytesSync(bytes!);
-    await Share.shareXFiles([XFile(path)], text: 'Reporte Excel COC');
+    var fileBytes = excel.save();
+    final directory = await getTemporaryDirectory();
+    final filePath = "${directory.path}/Auditoria_COC_${DateTime.now().millisecondsSinceEpoch}.xlsx";
+    File(filePath)..createSync(recursive: true)..writeAsBytesSync(fileBytes!);
+    await Share.shareXFiles([XFile(filePath)], text: 'Reporte Excel COC');
   }
 }
