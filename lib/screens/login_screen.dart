@@ -48,7 +48,6 @@ class _LoginScreenState extends State<LoginScreen> {
               return;
             }
 
-            // Aquí guardamos EXCLUSIVAMENTE si debe mantener la sesión viva o no
             SharedPreferences prefs = await SharedPreferences.getInstance();
             await prefs.setBool('keep_session', _rememberMe);
 
@@ -139,82 +138,132 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xff1a237e),
-      body: Center(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24.0),
-          child: Container(
-            constraints: const BoxConstraints(maxWidth: 400),
-            padding: const EdgeInsets.all(30.0),
-            decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20)),
-            child: Form(
-              key: _formKey,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(Icons.school, size: 80, color: Color(0xff1a237e)),
-                  const SizedBox(height: 10),
-                  const Text("SISTEMA COC - UNIVO", style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xff1a237e))),
-                  const SizedBox(height: 25),
-                  TextFormField(
-                    controller: _emailController,
-                    keyboardType: TextInputType.emailAddress,
-                    decoration: const InputDecoration(labelText: 'Correo Institucional', prefixIcon: Icon(Icons.email), border: OutlineInputBorder()),
-                    validator: (value) => value!.isEmpty ? 'Ingrese su correo' : null,
-                  ),
-                  const SizedBox(height: 18),
-                  TextFormField(
-                    controller: _passwordController,
-                    obscureText: true,
-                    decoration: const InputDecoration(labelText: 'Contraseña', prefixIcon: Icon(Icons.lock), border: OutlineInputBorder()),
-                    validator: (value) => value!.isEmpty ? 'Ingrese su contraseña' : null,
-                  ),
-
-                  // Wrap reemplaza al Row problemático.
-                  // Manda el botón de recuperar abajo si la pantalla es muy estrecha.
-                  Wrap(
-                    alignment: WrapAlignment.spaceBetween,
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    children: [
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Checkbox(
-                            value: _rememberMe,
-                            activeColor: const Color(0xff1a237e),
-                            onChanged: (value) {
-                              setState(() {
-                                _rememberMe = value ?? false;
-                              });
-                            },
-                          ),
-                          const Text("Mantener sesión", style: TextStyle(fontSize: 13)),
-                        ],
-                      ),
-                      TextButton(
-                        onPressed: _forgotPassword,
-                        child: const Text("¿Olvidó su contraseña?", style: TextStyle(color: Color(0xff1a237e), decoration: TextDecoration.underline, fontSize: 13)),
-                      ),
-                    ],
-                  ),
-
-                  const SizedBox(height: 10),
-                  _isLoading
-                      ? const CircularProgressIndicator()
-                      : SizedBox(
-                    width: double.infinity,
-                    height: 55,
-                    child: ElevatedButton(
-                      onPressed: _handleLogin,
-                      style: ElevatedButton.styleFrom(backgroundColor: const Color(0xff1a237e), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
-                      child: const Text("Iniciar Sesión", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                    ),
-                  ),
-                ],
+      body: Stack(
+        children: [
+          // 1. Fondo de imagen a pantalla completa
+          Container(
+            decoration: const BoxDecoration(
+              image: DecorationImage(
+                image: AssetImage('lib/assets/SC-login.jpg'),
+                fit: BoxFit.cover,
               ),
             ),
           ),
-        ),
+          // 2. Filtro oscuro para mejorar contraste
+          Container(
+            color: Colors.black.withOpacity(0.55),
+          ),
+          // 3. Contenido Central
+          Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(24.0),
+              child: Container(
+                constraints: const BoxConstraints(maxWidth: 420),
+                padding: const EdgeInsets.all(35.0),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.94),
+                  borderRadius: BorderRadius.circular(30.0),
+                  boxShadow: const [
+                    BoxShadow(color: Colors.black45, blurRadius: 20, offset: Offset(0, 10))
+                  ],
+                ),
+                child: Form(
+                  key: _formKey,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // Logo PNG
+                      Image.asset('lib/assets/Recurso_8.png', height: 110),
+                      const SizedBox(height: 10),
+                      const Text(
+                        "Gestión de Emisiones de Carnet",
+                        style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Color(0xff1a237e)),
+                      ),
+                      const Text(
+                        "COC",
+                        style: TextStyle(fontSize: 14, color: Colors.grey, letterSpacing: 2, fontWeight: FontWeight.w500),
+                      ),
+                      const SizedBox(height: 35),
+                      
+                      // Email
+                      TextFormField(
+                        controller: _emailController,
+                        keyboardType: TextInputType.emailAddress,
+                        decoration: InputDecoration(
+                          labelText: 'Correo',
+                          prefixIcon: const Icon(Icons.email_outlined, color: Color(0xff1a237e)),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(15)),
+                          filled: true,
+                          fillColor: Colors.white,
+                        ),
+                        validator: (value) => value!.isEmpty ? 'Ingrese su correo' : null,
+                      ),
+                      const SizedBox(height: 20),
+                      
+                      // Password
+                      TextFormField(
+                        controller: _passwordController,
+                        obscureText: true,
+                        decoration: InputDecoration(
+                          labelText: 'Contraseña',
+                          prefixIcon: const Icon(Icons.lock_outline, color: Color(0xff1a237e)),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(15)),
+                          filled: true,
+                          fillColor: Colors.white,
+                        ),
+                        validator: (value) => value!.isEmpty ? 'Ingrese su contraseña' : null,
+                      ),
+                      
+                      const SizedBox(height: 10),
+
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Row(
+                            children: [
+                              Checkbox(
+                                value: _rememberMe,
+                                activeColor: const Color(0xff1a237e),
+                                onChanged: (value) => setState(() => _rememberMe = value ?? false),
+                              ),
+                              const Text("Recordarme", style: TextStyle(fontSize: 13, color: Colors.black87)),
+                            ],
+                          ),
+                          TextButton(
+                            onPressed: _forgotPassword,
+                            child: const Text("¿Olvidó su clave?", style: TextStyle(color: Color(0xff1a237e), fontWeight: FontWeight.bold, fontSize: 13)),
+                          ),
+                        ],
+                      ),
+
+                      const SizedBox(height: 20),
+                      
+                      // Botón
+                      _isLoading
+                          ? const CircularProgressIndicator()
+                          : SizedBox(
+                              width: double.infinity,
+                              height: 60,
+                              child: ElevatedButton(
+                                onPressed: _handleLogin,
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xff1a237e),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+                                  elevation: 4,
+                                ),
+                                child: const Text(
+                                  "ENTRAR AL SISTEMA",
+                                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+                                ),
+                              ),
+                            ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
